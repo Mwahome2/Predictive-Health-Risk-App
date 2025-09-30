@@ -1,32 +1,33 @@
 # ============================================
-# Streamlit app that loads cause_group_pipeline.pkl
+# Streamlit app that loads cause_and_exact_pipeline.pkl
 # ============================================
 import streamlit as st
 import joblib
 import pandas as pd
-import numpy as np
 from datetime import datetime
 import os
 
 st.set_page_config(page_title="Predictive Health Risk App", layout="centered")
 
 st.title("🩺 Predictive Health Risk App")
-st.markdown("Predict the **cause of death group** from age, gender and location.")
+st.markdown("Predict both the **exact cause of death** and the broader **cause group** from age, gender and location.")
 
-# ---- Load saved assets (pipeline + categories + eval report) ----
+# ---- Load saved assets (two models + categories + eval reports) ----
 try:
-    assets = joblib.load("cause_group_pipeline.pkl")
-    pipeline = assets["model"]
+    assets = joblib.load("cause_and_exact_pipeline.pkl")
+    model_group = assets["model_group"]
+    model_exact = assets["model_exact"]
     categories = assets.get("categories", {})
-    eval_report = assets.get("eval_report", None)
+    eval_group = assets.get("eval_group", None)
+    eval_exact = assets.get("eval_exact", None)
 except FileNotFoundError:
-    st.error("`cause_group_pipeline.pkl` not found. Run the Colab exporter cell and upload the .pkl to this app's repo.")
+    st.error("`cause_and_exact_pipeline.pkl` not found. Run the Colab exporter cell and upload it to this app's repo.")
     st.stop()
 except Exception as e:
     st.error(f"Error loading model file: {e}")
     st.stop()
 
-# ---- UI inputs: use categories saved in assets ----
+# ---- UI inputs ----
 gender_options = categories.get("GENDER", ["M", "F"])
 location_options = categories.get("LOCATION", ["Unknown"])
 age_group_options = categories.get("AGE_GROUP", ["0-5", "6-18", "19-40", "41-60", "60+"])
@@ -35,10 +36,9 @@ age = st.number_input("Enter age", min_value=0, max_value=120, value=30, step=1)
 gender = st.selectbox("Gender", gender_options)
 location = st.selectbox("Location", location_options)
 
-# ---- Auto or manual age group ----
 auto_age_group = st.checkbox("Auto-derive Age Group from age", value=True)
 
-def age_group_func(a):
+def derive_age_group(a):
     try:
         a = float(a)
     except:
@@ -50,7 +50,7 @@ def age_group_func(a):
     return "60+"
 
 if auto_age_group:
-    age_group = age_group_func(age)
+    age_group = derive_age_group(age)
     if age_group not in age_group_options:
         age_group = age_group_options[0]
     st.write(f"Derived age group: **{age_group}**")
@@ -62,10 +62,13 @@ input_df = pd.DataFrame([[age, gender, location, age_group]],
                         columns=["AGE", "GENDER", "LOCATION", "AGE_GROUP"])
 
 # ---- Prediction ----
-if st.button("🔮 Predict Cause Group"):
+if st.button("🔮 Predict Cause & Group"):
     try:
-        pred = pipeline.predict(input_df)[0]
-        st.success(f"Predicted cause group: **{pred}**")
+        pred_group = model_group.predict(input_df)[0]
+        pred_exact = model_exact.predict(input_df)[0]
+
+        st.success(f"Predicted Cause Group: **{pred_group}**")
+        st.success(f"Predicted Exact Cause: **{pred_exact}**")
 
         # ---- Log prediction to CSV ----
         log_file = "predictions_log.csv"
@@ -75,7 +78,8 @@ if st.button("🔮 Predict Cause Group"):
             "gender": gender,
             "location": location,
             "age_group": age_group,
-            "prediction": pred,
+            "cause_group": pred_group,
+            "cause_exact": pred_exact,
         }
         if os.path.exists(log_file):
             df_log = pd.read_csv(log_file)
@@ -88,28 +92,28 @@ if st.button("🔮 Predict Cause Group"):
     except Exception as e:
         st.error(f"Prediction error: {e}")
 
-# ---- Developer-only debug mode ----
-if st.checkbox("🔧 Show backend categories (for developers)"):
-    st.json(categories)
-
-# ---- Performance / evaluation (saved during training) ----
-if st.checkbox("Show model performance (saved test eval)"):
-    if eval_report is None:
-        st.info("No evaluation report found in the saved pipeline.")
-    else:
-        df_report = pd.DataFrame(eval_report).transpose()
-        cols = [c for c in ["precision", "recall", "f1-score", "support"] if c in df_report.columns]
-        st.write("### Classification report (test set)")
-        st.dataframe(df_report[cols].round(3))
-
-# ---- View logs ----
+# ---- View past predictions ----
 if st.checkbox("📜 View past predictions"):
     log_file = "predictions_log.csv"
     if os.path.exists(log_file):
         df_log = pd.read_csv(log_file)
-        st.dataframe(df_log.tail(50))  # show last 50 entries
+        st.dataframe(df_log.tail(50))  # show last 50
     else:
         st.info("No predictions logged yet.")
+
+# ---- Performance reports ----
+if st.checkbox("📊 Show model performance"):
+    if eval_group:
+        st.write("### Group model performance")
+        dfg = pd.DataFrame(eval_group).transpose()
+        cols = [c for c in ["precision", "recall", "f1-score", "support"] if c in dfg.columns]
+        st.dataframe(dfg[cols].round(3))
+    if eval_exact:
+        st.write("### Exact cause model performance")
+        dfe = pd.DataFrame(eval_exact).transpose()
+        cols = [c for c in ["precision", "recall", "f1-score", "support"] if c in dfe.columns]
+        st.dataframe(dfe[cols].round(3))
+
 
 # ============================================
 # End of app.py
