@@ -5,17 +5,19 @@ import streamlit as st
 import joblib
 import pandas as pd
 import numpy as np
+from datetime import datetime
+import os
 
 st.set_page_config(page_title="Predictive Health Risk App", layout="centered")
 
 st.title("🩺 Predictive Health Risk App")
 st.markdown("Predict the **cause of death group** from age, gender and location.")
 
-# ---- Load saved assets (pipeline + encoders + eval report) ----
+# ---- Load saved assets (pipeline + categories + eval report) ----
 try:
     assets = joblib.load("cause_group_pipeline.pkl")
     pipeline = assets["model"]
-    encoders = assets.get("encoders", {})
+    categories = assets.get("categories", {})
     eval_report = assets.get("eval_report", None)
 except FileNotFoundError:
     st.error("`cause_group_pipeline.pkl` not found. Run the Colab exporter cell and upload the .pkl to this app's repo.")
@@ -24,16 +26,16 @@ except Exception as e:
     st.error(f"Error loading model file: {e}")
     st.stop()
 
-# ---- UI inputs: use encoder classes if available, else simple defaults ----
-gender_options = list(encoders.get("GENDER").classes_) if encoders.get("GENDER") is not None else ["Male", "Female", "Other"]
-location_options = list(encoders.get("LOCATION").classes_) if encoders.get("LOCATION") is not None else ["Urban", "Rural", "Unknown"]
-age_group_options = list(encoders.get("AGE_GROUP").classes_) if encoders.get("AGE_GROUP") is not None else ["0-5", "6-18", "19-40", "41-60", "60+"]
+# ---- UI inputs: use categories saved in assets ----
+gender_options = categories.get("GENDER", ["M", "F"])
+location_options = categories.get("LOCATION", ["Unknown"])
+age_group_options = categories.get("AGE_GROUP", ["0-5", "6-18", "19-40", "41-60", "60+"])
 
 age = st.number_input("Enter age", min_value=0, max_value=120, value=30, step=1)
 gender = st.selectbox("Gender", gender_options)
 location = st.selectbox("Location", location_options)
 
-# Offer a choice: auto-derive age group or let user pick
+# ---- Auto or manual age group ----
 auto_age_group = st.checkbox("Auto-derive Age Group from age", value=True)
 
 def age_group_func(a):
@@ -62,22 +64,33 @@ input_df = pd.DataFrame([[age, gender, location, age_group]],
 # ---- Prediction ----
 if st.button("🔮 Predict Cause Group"):
     try:
-        # (we already have input_df prepared above)
-        # Directly pass labels to the pipeline
         pred = pipeline.predict(input_df)[0]
         st.success(f"Predicted cause group: **{pred}**")
+
+        # ---- Log prediction to CSV ----
+        log_file = "predictions_log.csv"
+        log_entry = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "age": age,
+            "gender": gender,
+            "location": location,
+            "age_group": age_group,
+            "prediction": pred,
+        }
+        if os.path.exists(log_file):
+            df_log = pd.read_csv(log_file)
+            df_log = pd.concat([df_log, pd.DataFrame([log_entry])], ignore_index=True)
+        else:
+            df_log = pd.DataFrame([log_entry])
+        df_log.to_csv(log_file, index=False)
+        st.info("✅ Prediction logged successfully!")
+
     except Exception as e:
         st.error(f"Prediction error: {e}")
 
 # ---- Developer-only debug mode ----
-if st.checkbox("🔧 Show backend encodings (for developers)"):
-    encoded_preview = {}
-    for col in ["GENDER", "LOCATION", "AGE_GROUP"]:
-        if col in encoders:
-            le = encoders[col]
-            encoded_value = le.transform([input_df[col][0]])[0]
-            encoded_preview[col] = f"{encoded_value} → {input_df[col][0]}"
-    st.json(encoded_preview)
+if st.checkbox("🔧 Show backend categories (for developers)"):
+    st.json(categories)
 
 # ---- Performance / evaluation (saved during training) ----
 if st.checkbox("Show model performance (saved test eval)"):
@@ -88,6 +101,15 @@ if st.checkbox("Show model performance (saved test eval)"):
         cols = [c for c in ["precision", "recall", "f1-score", "support"] if c in df_report.columns]
         st.write("### Classification report (test set)")
         st.dataframe(df_report[cols].round(3))
+
+# ---- View logs ----
+if st.checkbox("📜 View past predictions"):
+    log_file = "predictions_log.csv"
+    if os.path.exists(log_file):
+        df_log = pd.read_csv(log_file)
+        st.dataframe(df_log.tail(50))  # show last 50 entries
+    else:
+        st.info("No predictions logged yet.")
 
 # ============================================
 # End of app.py
