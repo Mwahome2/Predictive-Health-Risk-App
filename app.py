@@ -35,6 +35,7 @@ location = st.selectbox("Location", location_options)
 
 # Offer a choice: auto-derive age group or let user pick
 auto_age_group = st.checkbox("Auto-derive Age Group from age", value=True)
+
 def age_group_func(a):
     try:
         a = float(a)
@@ -56,25 +57,29 @@ else:
     age_group = st.selectbox("Age group", age_group_options)
 
 # ---- Prepare input row and predict ----
-input_df = pd.DataFrame([[age, gender, location, age_group]], columns=["AGE", "GENDER", "LOCATION", "AGE_GROUP"])
+input_df = pd.DataFrame([[age, gender, location, age_group]],
+                        columns=["AGE", "GENDER", "LOCATION", "AGE_GROUP"])
 
 if st.button("🔮 Predict Cause Group"):
     try:
-        # Prepare the row
-        input_df = pd.DataFrame([[age, gender, location, age_group]], 
-                                columns=["AGE", "GENDER", "LOCATION", "AGE_GROUP"])
-        
-        # Show how each category was encoded
-        st.write("### Encoded Values")
-        encoded_preview = {}
-        for col in ["GENDER", "LOCATION", "AGE_GROUP"]:
-            if col in encoders:
-                le = encoders[col]
-                encoded_value = le.transform([input_df[col][0]])[0]
-                encoded_preview[col] = f"{encoded_value} → {input_df[col][0]}"
-        st.json(encoded_preview)  # displays mapping nicely
+        # Note: in previous version, we rebuilt input_df here
+        # Keeping it for structure, but reusing existing input_df
+        input_df = input_df.copy()
 
-        # Predict
+        # 🔄 Previously, we showed encoded values like "1 → Male"
+        # That confused users, so we COMMENT it out.
+        # You can re-enable for debugging if needed.
+        #
+        # st.write("### Encoded Values (debug only)")
+        # encoded_preview = {}
+        # for col in ["GENDER", "LOCATION", "AGE_GROUP"]:
+        #     if col in encoders:
+        #         le = encoders[col]
+        #         encoded_value = le.transform([input_df[col][0]])[0]
+        #         encoded_preview[col] = f"{encoded_value} → {input_df[col][0]}"
+        # st.json(encoded_preview)
+
+        # ✅ Predict using pipeline (users only see labels, not ints)
         pred = pipeline.predict(input_df)[0]
         st.success(f"Predicted cause group: **{pred}**")
 
@@ -88,9 +93,13 @@ if st.checkbox("Show model performance (saved test eval)"):
     else:
         # Display a compact table with the 'weighted avg' and class f1's
         df_report = pd.DataFrame(eval_report).transpose()
-        # show only a few relevant columns if present
         cols = [c for c in ["precision", "recall", "f1-score", "support"] if c in df_report.columns]
         st.write("### Classification report (test set)")
         st.dataframe(df_report[cols].round(3))
+
+# ============================================
+# End of app.py
+# ============================================
+
 
 
