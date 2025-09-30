@@ -1,97 +1,80 @@
+# ============================================
+# Streamlit app that loads cause_group_pipeline.pkl
+# ============================================
 import streamlit as st
 import joblib
-import numpy as np
 import pandas as pd
+import numpy as np
 
-# ===============================
-# 1. Load Model + Encoders
-# ===============================
-assets = None
-loaded_model = None
-label_encoders = {}
+st.set_page_config(page_title="Predictive Health Risk App", layout="centered")
 
+st.title("🩺 Predictive Health Risk App")
+st.markdown("Predict the **cause of death group** from age, gender and location.")
+
+# ---- Load saved assets (pipeline + encoders + eval report) ----
 try:
-    pipeline_path = "cause_group_pipeline.pkl"  # Make sure this file is in the repo
-    assets = joblib.load(open(pipeline_path, "rb"))
-    loaded_model = assets["model"]
-    label_encoders = assets["encoders"]
-
-    st.success("✅ Model and encoders loaded successfully!")
+    assets = joblib.load("cause_group_pipeline.pkl")
+    pipeline = assets["model"]
+    encoders = assets.get("encoders", {})
+    eval_report = assets.get("eval_report", None)
 except FileNotFoundError:
-    st.error("❌ Model file not found. Please upload cause_group_pipeline.pkl.")
+    st.error("`cause_group_pipeline.pkl` not found. Run the Colab exporter cell and upload the .pkl to this app's repo.")
+    st.stop()
 except Exception as e:
-    st.error(f"⚠️ Error loading model: {e}")
+    st.error(f"Error loading model file: {e}")
+    st.stop()
 
-# ===============================
-# 2. Prediction Function
-# ===============================
-def predict_cause_group(input_features):
+# ---- UI inputs: use encoder classes if available, else simple defaults ----
+gender_options = list(encoders.get("GENDER").classes_) if encoders.get("GENDER") is not None else ["Male", "Female", "Other"]
+location_options = list(encoders.get("LOCATION").classes_) if encoders.get("LOCATION") is not None else ["Urban", "Rural", "Unknown"]
+age_group_options = list(encoders.get("AGE_GROUP").classes_) if encoders.get("AGE_GROUP") is not None else ["0-5", "6-18", "19-40", "41-60", "60+"]
+
+age = st.number_input("Enter age", min_value=0, max_value=120, value=30, step=1)
+gender = st.selectbox("Gender", gender_options)
+location = st.selectbox("Location", location_options)
+
+# Offer a choice: auto-derive age group or let user pick
+auto_age_group = st.checkbox("Auto-derive Age Group from age", value=True)
+def age_group_func(a):
     try:
-        input_array = np.asarray(input_features).reshape(1, -1)
-        numerical_prediction = loaded_model.predict(input_array)[0]
+        a = float(a)
+    except:
+        return "Unknown"
+    if a <= 5: return "0-5"
+    if a <= 18: return "6-18"
+    if a <= 40: return "19-40"
+    if a <= 60: return "41-60"
+    return "60+"
 
-        # Decode cause group if encoder exists
-        if "CAUSE_GROUP" in label_encoders:
-            prediction_label = label_encoders["CAUSE_GROUP"].inverse_transform([numerical_prediction])[0]
-        else:
-            prediction_label = str(numerical_prediction)
+if auto_age_group:
+    age_group = age_group_func(age)
+    # if derived group not in available options, fallback to first option
+    if age_group not in age_group_options:
+        age_group = age_group_options[0]
+    st.write(f"Derived age group: **{age_group}**")
+else:
+    age_group = st.selectbox("Age group", age_group_options)
 
-        return prediction_label
+# ---- Prepare input row and predict ----
+input_df = pd.DataFrame([[age, gender, location, age_group]], columns=["AGE", "GENDER", "LOCATION", "AGE_GROUP"])
+
+if st.button("🔮 Predict Cause Group"):
+    try:
+        pred = pipeline.predict(input_df)[0]  # pipeline returns the string label for cause group
+        st.success(f"Predicted cause group: **{pred}**")
     except Exception as e:
         st.error(f"Prediction error: {e}")
-        return "Error"
 
-# ===============================
-# 3. Streamlit UI
-# ===============================
-def main():
-    st.set_page_config(page_title="🧑‍⚕️ Predictive Health Risk App", layout="centered")
-    st.title("🧑‍⚕️ Predictive Health Risk Web App")
-    st.markdown("Enter demographic details to predict the likely **Cause of Death Group** (proxy for health risk).")
-
-    # --- Inputs ---
-    age = st.slider("Age", min_value=0, max_value=100, value=30, step=1)
-
-    # Gender
-    if "GENDER" in label_encoders:
-        gender_options = list(label_encoders["GENDER"].classes_)
-        gender = st.selectbox("Gender", gender_options)
-        gender_encoded = label_encoders["GENDER"].transform([gender])[0]
+# ---- Performance / evaluation (saved during training) ----
+if st.checkbox("Show model performance (saved test eval)"):
+    if eval_report is None:
+        st.info("No evaluation report found in the saved pipeline.")
     else:
-        st.warning("⚠️ Gender encoder not loaded.")
-        gender_encoded = 0
-
-    # Location
-    if "LOCATION" in label_encoders:
-        location_options = list(label_encoders["LOCATION"].classes_)
-        location = st.selectbox("Location", location_options)
-        location_encoded = label_encoders["LOCATION"].transform([location])[0]
-    else:
-        st.warning("⚠️ Location encoder not loaded.")
-        location_encoded = 0
-
-    # Age Group
-    if "AGE_GROUP" in label_encoders:
-        age_group_options = list(label_encoders["AGE_GROUP"].classes_)
-        age_group = st.selectbox("Age Group", age_group_options)
-        age_group_encoded = label_encoders["AGE_GROUP"].transform([age_group])[0]
-    else:
-        st.warning("⚠️ Age group encoder not loaded.")
-        age_group_encoded = 0
-
-    st.markdown("---")
-
-    # --- Predict ---
-    if st.button("🔮 Predict Health Risk"):
-        input_data = [age, gender_encoded, location_encoded, age_group_encoded]
-        result = predict_cause_group(input_data)
-
-        st.success(f"✅ Predicted Cause Group: **{result}**")
-
-    st.markdown("---")
-    st.caption("⚠️ Disclaimer: This app provides AI-assisted predictions and should not replace professional medical advice.")
-
-if __name__ == "__main__":
-    main()
+        # Display a compact table with the 'weighted avg' and class f1's
+        df_report = pd.DataFrame(eval_report).transpose()
+        # show only a few relevant columns if present
+        cols = [c for c in ["precision", "recall", "f1-score", "support"] if c in df_report.columns]
+        st.write("### Classification report (test set)")
+        st.dataframe(df_report[cols].round(3))
 
 
