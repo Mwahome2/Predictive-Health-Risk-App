@@ -60,8 +60,24 @@ input_df = pd.DataFrame([[age, gender, location, age_group]], columns=["AGE", "G
 
 if st.button("🔮 Predict Cause Group"):
     try:
-        pred = pipeline.predict(input_df)[0]  # pipeline returns the string label for cause group
+        # Prepare the row
+        input_df = pd.DataFrame([[age, gender, location, age_group]], 
+                                columns=["AGE", "GENDER", "LOCATION", "AGE_GROUP"])
+        
+        # Show how each category was encoded
+        st.write("### Encoded Values")
+        encoded_preview = {}
+        for col in ["GENDER", "LOCATION", "AGE_GROUP"]:
+            if col in encoders:
+                le = encoders[col]
+                encoded_value = le.transform([input_df[col][0]])[0]
+                encoded_preview[col] = f"{encoded_value} → {input_df[col][0]}"
+        st.json(encoded_preview)  # displays mapping nicely
+
+        # Predict
+        pred = pipeline.predict(input_df)[0]
         st.success(f"Predicted cause group: **{pred}**")
+
     except Exception as e:
         st.error(f"Prediction error: {e}")
 
