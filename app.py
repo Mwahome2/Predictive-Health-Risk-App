@@ -49,49 +49,41 @@ def age_group_func(a):
 
 if auto_age_group:
     age_group = age_group_func(age)
-    # if derived group not in available options, fallback to first option
     if age_group not in age_group_options:
         age_group = age_group_options[0]
     st.write(f"Derived age group: **{age_group}**")
 else:
     age_group = st.selectbox("Age group", age_group_options)
 
-# ---- Prepare input row and predict ----
+# ---- Prepare input row ----
 input_df = pd.DataFrame([[age, gender, location, age_group]],
                         columns=["AGE", "GENDER", "LOCATION", "AGE_GROUP"])
 
+# ---- Prediction ----
 if st.button("🔮 Predict Cause Group"):
     try:
-        # Note: in previous version, we rebuilt input_df here
-        # Keeping it for structure, but reusing existing input_df
-        input_df = input_df.copy()
-
-        # 🔄 Previously, we showed encoded values like "1 → Male"
-        # That confused users, so we COMMENT it out.
-        # You can re-enable for debugging if needed.
-        #
-        # st.write("### Encoded Values (debug only)")
-        # encoded_preview = {}
-        # for col in ["GENDER", "LOCATION", "AGE_GROUP"]:
-        #     if col in encoders:
-        #         le = encoders[col]
-        #         encoded_value = le.transform([input_df[col][0]])[0]
-        #         encoded_preview[col] = f"{encoded_value} → {input_df[col][0]}"
-        # st.json(encoded_preview)
-
-        # ✅ Predict using pipeline (users only see labels, not ints)
+        # (we already have input_df prepared above)
+        # Directly pass labels to the pipeline
         pred = pipeline.predict(input_df)[0]
         st.success(f"Predicted cause group: **{pred}**")
-
     except Exception as e:
         st.error(f"Prediction error: {e}")
+
+# ---- Developer-only debug mode ----
+if st.checkbox("🔧 Show backend encodings (for developers)"):
+    encoded_preview = {}
+    for col in ["GENDER", "LOCATION", "AGE_GROUP"]:
+        if col in encoders:
+            le = encoders[col]
+            encoded_value = le.transform([input_df[col][0]])[0]
+            encoded_preview[col] = f"{encoded_value} → {input_df[col][0]}"
+    st.json(encoded_preview)
 
 # ---- Performance / evaluation (saved during training) ----
 if st.checkbox("Show model performance (saved test eval)"):
     if eval_report is None:
         st.info("No evaluation report found in the saved pipeline.")
     else:
-        # Display a compact table with the 'weighted avg' and class f1's
         df_report = pd.DataFrame(eval_report).transpose()
         cols = [c for c in ["precision", "recall", "f1-score", "support"] if c in df_report.columns]
         st.write("### Classification report (test set)")
@@ -100,6 +92,4 @@ if st.checkbox("Show model performance (saved test eval)"):
 # ============================================
 # End of app.py
 # ============================================
-
-
 
